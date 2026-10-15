@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
+# Merge the Noctalia-generated [theme] section into Ratune's config.toml.
+# Everything else in the config is left untouched.
 set -euo pipefail
 
-config="${XDG_CONFIG_HOME:-$HOME/.config}/ratune/config.toml"
-generated="${XDG_CONFIG_HOME:-$HOME/.config}/ratune/theme.generated.toml"
+dir="${XDG_CONFIG_HOME:-$HOME/.config}/ratune"
+config="$dir/config.toml"
+generated="$dir/theme.generated.toml"
 
 if [[ ! -f "$config" ]]; then
     echo "Ratune config not found: $config" >&2
@@ -14,46 +17,29 @@ if [[ ! -f "$generated" ]]; then
     exit 1
 fi
 
-python3 - "$config" "$generated" <<'PY'
-import os
-import re
-import sys
-import tempfile
-from pathlib import Path
+if ! grep -qE '^\[theme\][[:space:]]*$' "$generated"; then
+    echo "Generated theme has no [theme] section: $generated" >&2
+    exit 1
+fi
 
-config = Path(sys.argv[1])
-generated = Path(sys.argv[2])
+tmp="$(mktemp "$config.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
 
-original = config.read_text()
-theme = generated.read_text().strip()
+# Swap the existing [theme] section for the generated one, or append it if
+# the config has none. Other sections and comments outside [theme] are kept.
+THEME="$(<"$generated")" awk '
+    function emit() { print ENVIRON["THEME"]; print ""; done = 1 }
+    /^\[theme\][ \t\r]*$/ { if (!done) emit(); skip = 1; next }
+    /^\[/                 { skip = 0 }
+    !skip                 { print }
+    END                   { if (!done) { print ""; emit() } }
+' "$config" > "$tmp"
 
-if not re.match(r"^\[theme\]\s*$", theme.splitlines()[0]):
-    raise SystemExit("Generated file must start with [theme]")
+# Nothing changed: leave the file alone so ratune does not reload for nothing.
+if cmp -s "$tmp" "$config"; then
+    exit 0
+fi
 
-pattern = re.compile(
-    r"(?ms)^\[theme\][ \t]*\r?\n.*?"
-    r"(?=^\[|\Z)"
-)
-
-if pattern.search(original):
-    updated = pattern.sub(theme + "\n\n", original, count=1)
-else:
-    updated = original.rstrip() + "\n\n" + theme + "\n"
-
-fd, temporary = tempfile.mkstemp(
-    dir=config.parent, prefix=config.name + "."
-)
-
-try:
-    with os.fdopen(fd, "w") as f:
-        f.write(updated)
-
-    os.chmod(temporary, config.stat().st_mode)
-    os.replace(temporary, config)
-except BaseException:
-    try:
-        os.unlink(temporary)
-    except FileNotFoundError:
-        pass
-    raise
-PY
+# Write through the existing file (not mv) so a symlinked config, e.g. one
+# managed by a dotfiles repo, stays a symlink and keeps its permissions.
+cat "$tmp" > "$config"
