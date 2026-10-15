@@ -6,4 +6,3 @@ category = "audio"
 input_path = "ratune.toml"
 output_path = "$XDG_CONFIG_HOME/ratune/theme.generated.toml"
 post_hook = "bash '{{ config_dir }}/apply.sh'"
-hook_async = false
