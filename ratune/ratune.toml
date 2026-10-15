@@ -1,5 +1,5 @@
 [theme]
-preset = "dynamic"
+preset = "static"
 accent = "{{ colors.primary.default.hex }}"
 background = "{{ colors.surface.default.hex }}"
 tab_bar = "{{ colors.surface.default.hex }}"
